@@ -3,8 +3,9 @@ cache:
   directories:
   - $HOME/.cabal
 sudo: false
-script:
+install:
   - cabal install idris
+script:
   - idris --check cube.idr  
 notifications:
   email: false
