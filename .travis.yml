@@ -1,0 +1,16 @@
+language: haskell
+cache:
+  directories:
+  - $HOME/.cabal
+sudo: false
+script:
+  - cabal install idris
+  - idris --check cube.idr  
+notifications:
+  email: false
+  irc:
+    channels:
+      - "irc.fyrechat.net#vana-commits"
+    template:
+      - "%{repository_slug}/%{branch} (%{commit} - %{author}): %{message}"
+    skip_join: true
