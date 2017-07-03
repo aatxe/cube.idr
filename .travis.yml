@@ -4,6 +4,7 @@ cache:
   - $HOME/.cabal
 sudo: false
 install:
+  - cabal install cabal-install
   - cabal install idris
 script:
   - idris --check cube.idr  
