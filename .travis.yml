@@ -17,7 +17,7 @@ before_install:
 install:
   - travis_wait 60 stack install --install-ghc idris
 script:
-  - idris --check cube.idr
+  - idris --build cube.ipkg
 
 notifications:
   email: false
