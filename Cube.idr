@@ -3,98 +3,82 @@ module Cube
 Id : Type
 Id = String
 
+-- Kinds
+data Kind = Star
+          | Box
+
 -- Expressions
 data Expr = Var Id
           | App Expr Expr
-          | Lambda Id Expr
+          | Lambda Id Expr Expr
+          | Pi Id Expr Expr
+          | Knd Kind
 
 %name Expr e, e'
 
 -- Free Variables
 freeVars : Expr -> List Id
-freeVars (Var x) = [x]
-freeVars (App f e) =  freeVars f `union` freeVars e
-freeVars (Lambda x e) = freeVars e \\ [x]
+freeVars (Var id) = [id]
+freeVars (App fun arg) =  freeVars fun `union` freeVars arg
+freeVars (Lambda id ty expr) = freeVars ty `union` (freeVars expr \\ [id])
+freeVars (Pi id kind ty) = freeVars kind `union` (freeVars ty \\ [id])
 
 -- Substitution
--- sub id with x in e
 subst : Id -> Expr -> Expr -> Expr
-subst id x e@(Var y) = if id == y then x else e
-subst id x (App e e') = App (subst id x e) (subst id x e')
-subst id x (Lambda y e) =
-      if id == y then
-          Lambda y e
-      else if elem y free then
-           let y' = freshId e y
-               e' = subst id (Var y') e
-           in Lambda y' $ subst id x e'
-      else
-          Lambda y $ subst id x e
-    where free : List Id
-          free = freeVars x
-          freshId : Expr -> Id -> Id
-          freshId e i = loop i
+subst id expr = sub
+  where free : List Id
+        free = freeVars expr
+
+        freshId : Expr -> Id -> Id
+        freshId e i = loop i
           where vars : List Id
                 vars = free ++ freeVars e
+
                 loop : Id -> Id
                 loop i = if elem i vars then loop (i ++ "'") else i
 
--- Weak Head Normal Form
-whnf : Expr -> Expr
-whnf e = spine e []
-     where spine : Expr -> List Expr -> Expr
-           spine (App f x) xs = spine f (x :: xs)
-           spine (Lambda id e) (x :: xs) = spine (subst id x e) xs
-           spine e xs = foldl App e xs
+        mutual
+          sub : Expr -> Expr
+          sub this@(Var id') = if id == id' then expr else this
+          sub (App fun arg) = App (sub fun) (sub arg)
+          sub (Lambda id' ty body) = abstr Lambda id' ty body
+          sub (Pi id' kind ty) = abstr Pi id' kind ty
+          sub this@(Knd _) = this
+
+          abstr : (cons : Id -> Expr -> Expr -> Expr) -> (id : Id) -> (ty : Expr) -> (body : Expr) -> Expr
+          abstr cons id' ty body =
+            if id == id' then
+              cons id' (sub ty) body
+            else if elem id' free then
+              let fresh = freshId body id'
+                  body' = subst id (Var id') body
+              in cons fresh (sub ty) (sub body')
+            else
+              cons id' (sub ty) (sub body)
+
+-- Normal Form
+nf : Expr -> Expr
+nf expr = spine expr []
+  where app : Expr -> List Expr -> Expr
+        app e xs = foldl App e $ map nf xs
+
+        spine : Expr -> List Expr -> Expr
+        spine (App fun arg) xs = spine fun $ arg :: xs
+        spine (Lambda id t e) [] = Lambda id (nf t) (nf e)
+        spine (Lambda id _ e) (x :: xs) = spine (subst id x e) xs
+        spine (Pi id knd ty) xs = app (Pi id (nf knd) (nf ty)) xs
+        spine e xs = app e xs
 
 -- Alpha Equivalence
 alphaEq : Expr -> Expr -> Bool
 alphaEq (Var x) (Var x') = x == x'
 alphaEq (App e x) (App e' x') = alphaEq e e' && alphaEq x x'
-alphaEq (Lambda x e) (Lambda x' e') = alphaEq e $ subst x' (Var x) e'
+alphaEq (Lambda x t e) (Lambda x' t' e') = alphaEq t t' && alphaEq e (subst x' (Var x) e')
+alphaEq (Pi x k t) (Pi x' k' t') = alphaEq k k' && alphaEq t (subst x' (Var x) t')
+alphaEq (Knd Star) (Knd Star) = True
+alphaEq (Knd Box) (Knd Box) = True
 alphaEq _ _ = False
-
--- Normal Form
-nf : Expr -> Expr
-nf e = spine e []
-    where spine : Expr -> List Expr -> Expr
-          spine (App f x) xs = spine f $ x :: xs
-          spine (Lambda x e) [] = Lambda x $ nf e
-          spine (Lambda x e) (y :: ys) = spine (subst x y e) ys
-          spine f xs = foldl App f $ map nf xs
 
 -- Beta Equivalence
 betaEq : Expr -> Expr -> Bool
 betaEq e1 e2 = alphaEq (nf e1) (nf e2)
-
--- Expressions in Lambda Calculus
-
-z : Expr
-z = Var "z"
-
-s : Expr
-s = Var "s"
-
-m : Expr
-m = Var "m"
-
-n : Expr
-n = Var "n"
-
-app2 : Expr -> Expr -> Expr -> Expr
-app2 f x y = App (App f x) y
-
-zero : Expr
-zero  = Lambda "s" $ Lambda "z" z
-
-one : Expr
-one   = Lambda "s" $ Lambda "z" $ App s z
-
-two : Expr
-two   = Lambda "s" $ Lambda "z" $ App s $ App s z
-
-three : Expr
-three = Lambda "s" $ Lambda "z" $ App s $ App s $ App s z
-
-plus : Expr
-plus  = Lambda "m" $ Lambda "n" $ Lambda "s" $ Lambda "z" $ app2 m s (app2 n s z)
