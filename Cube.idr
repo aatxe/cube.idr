@@ -116,6 +116,14 @@ subst id expr = sub
             else
               cons id' (sub ty) (sub body)
 
+-- Weak-Head Normal Form
+whnf : Expr -> Expr
+whnf expr = spine expr []
+  where spine : Expr -> List Expr -> Expr
+        spine (App fun arg) xs = spine fun $ arg :: xs
+        spine (Lambda id _ e) (x :: xs) = spine (subst id x e) xs
+        spine fun xs = foldl App fun xs
+
 -- Normal Form
 nf : Expr -> Expr
 nf expr = spine expr []
@@ -165,35 +173,39 @@ find id env with (lookup id env)
   find _  _ | (Just ty) = Right ty
 
 -- Type Checking
-tcImpl : Env -> Expr -> TC Ty
-tcImpl env (Var id) = find id env
-tcImpl env (App fun arg) with (tcImpl env fun)
-  tcImpl env (App _ arg) | Right (Pi id argTy retTy) with (tcImpl env arg)
-    tcImpl env (App fun arg) | Right (Pi id argTy retTy) | Right tyArg =
-      if betaEq argTy tyArg then
-        Right $ subst id arg retTy
-      else
-        Left "Argument type mismatch in function application."
-    tcImpl _ _ | Right _ | Left err = Left err
-  tcImpl _ _ | Right ty = Left "Attempted to something with a non-Pi type."
-  tcImpl _ _ | Left err = Left err
-tcImpl env (Lambda id ty body) = do
-  tcImpl env ty
-  let env' = extend id ty env
-  tyBody <- tcImpl env' body
-  let piTy = Pi id ty tyBody
-  tcImpl env piTy
-  pure piTy
-tcImpl env (Pi id argTy retTy) = do
-  argKnd <- tcImpl env argTy
-  let env' = extend id argTy env
-  retKnd <- tcImpl env' retTy
-  if (argKnd, retKnd) `elem` allowedKinds then
-    Right retKnd
-  else
-    Left "Encountered a bad abstraction."
-tcImpl env (Knd Star) = pure $ Knd Box
-tcImpl env (Knd Box) = Left "Unexpected kind: \box"
+mutual
+  tcRedImpl : Env -> Expr -> TC Ty
+  tcRedImpl env expr = liftA whnf $ tcImpl env expr
+
+  tcImpl : Env -> Expr -> TC Ty
+  tcImpl env (Var id) = find id env
+  tcImpl env (App fun arg) with (tcRedImpl env fun)
+    tcImpl env (App _ arg) | Right (Pi id argTy retTy) with (tcImpl env arg)
+      tcImpl env (App fun arg) | Right (Pi id argTy retTy) | Right tyArg =
+        if betaEq argTy tyArg then
+          Right $ subst id arg retTy
+        else
+          Left "Argument type mismatch in function application."
+      tcImpl _ _ | Right _ | Left err = Left err
+    tcImpl _ _ | Right ty = Left "Attempted to something with a non-Pi type."
+    tcImpl _ _ | Left err = Left err
+  tcImpl env (Lambda id ty body) = do
+    tcImpl env ty
+    let env' = extend id ty env
+    tyBody <- tcImpl env' body
+    let piTy = Pi id ty tyBody
+    tcImpl env piTy
+    pure piTy
+  tcImpl env (Pi id argTy retTy) = do
+    argKnd <- tcRedImpl env argTy
+    let env' = extend id argTy env
+    retKnd <- tcRedImpl env' retTy
+    if (argKnd, retKnd) `elem` allowedKinds then
+      Right retKnd
+    else
+      Left "Encountered a bad abstraction."
+  tcImpl env (Knd Star) = pure $ Knd Box
+  tcImpl env (Knd Box) = Left "Unexpected kind: \box"
 
 typeCheck : Expr -> Ty
 typeCheck e with (tcImpl initialEnv e)
